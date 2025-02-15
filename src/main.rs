@@ -1,12 +1,25 @@
 use service::kueater::data::{
     index::{GetMenuListingsRequest, GetMenuListingsResponse, TopMenu, TopMenuRequest}, ku_eater_backend_server::{KuEaterBackend, KuEaterBackendServer}, search::{SearchRequest, SearchResponse}, GetMenuRequest, GetMenuResponse, GetReviewRequest, GetReviewResponse, GetStallRequest, GetStallResponse
 };
+use sqlx::{PgPool};
 use tonic::{transport::Server, Request, Response, Status};
+use std::env::var;
 
 mod service;
+mod db;
 
-#[derive(Default, Debug)]
-pub struct BackendService {}
+#[derive(Debug)]
+pub struct BackendService {
+    pg_pool: PgPool
+}
+
+impl BackendService {
+    pub fn new(pg_pool: PgPool) -> Self {
+        Self {
+            pg_pool
+        }
+    }
+}
 
 #[tonic::async_trait]
 impl KuEaterBackend for BackendService {
@@ -14,7 +27,7 @@ impl KuEaterBackend for BackendService {
     async fn index_get_menu_listings(
         &self, request: Request<GetMenuListingsRequest>
     ) -> Result<Response<GetMenuListingsResponse>, Status> {
-        service::index::get_menu_listing(request).await
+        service::index::get_menu_listing(&self.pg_pool, request).await
     }
 
     async fn index_top_menu(
@@ -59,8 +72,14 @@ impl KuEaterBackend for BackendService {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    let pg: PgPool = db::connect(var("DATABASE_URL")?).await?;
+    sqlx::migrate!().run(&pg).await?;
+
     let addr = "[::1]:50051".parse()?;
-    let service = BackendService::default();
+    let service = BackendService {
+        pg_pool: pg
+    };
 
     Server::builder()
         .add_service(KuEaterBackendServer::new(service))

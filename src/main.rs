@@ -1,52 +1,58 @@
-use kueater::{LocalizedString, Ingredient, MenuItem};
-use kueater::data::{GetMenuRequest, GetMenuResponse};
-use kueater::data::ku_eater_backend_server::{KuEaterBackend, KuEaterBackendServer};
-use tonic::transport::Server;
-use tonic::{Status, Request, Response};
+use service::kueater::data::{
+    index::{GetMenuListingsRequest, GetMenuListingsResponse, TopMenu, TopMenuRequest}, ku_eater_backend_server::{KuEaterBackend, KuEaterBackendServer}, search::{SearchRequest, SearchResponse}, GetMenuRequest, GetMenuResponse, GetReviewRequest, GetReviewResponse, GetStallRequest, GetStallResponse
+};
+use tonic::{transport::Server, Request, Response, Status};
 
-pub mod kueater {
-    tonic::include_proto!("kueater");
-    pub mod data {
-        tonic::include_proto!("kueater.data");
-        pub mod index {
-            tonic::include_proto!("kueater.data.index");
-        }
-        pub mod search {
-            tonic::include_proto!("kueater.data.search");
-        }
-    }
-}
+mod service;
 
-#[derive(Debug, Default)]
+#[derive(Default, Debug)]
 pub struct BackendService {}
 
 #[tonic::async_trait]
 impl KuEaterBackend for BackendService {
 
+    async fn index_get_menu_listings(
+        &self, request: Request<GetMenuListingsRequest>
+    ) -> Result<Response<GetMenuListingsResponse>, Status> {
+        service::index::get_menu_listing(request).await
+    }
+
+    async fn index_top_menu(
+        &self, request: Request<TopMenuRequest>
+    ) -> Result<Response<TopMenu>, Status> {
+        service::index::index_top_menu(request).await
+    }
+
+    async fn search(
+        &self, request: Request<SearchRequest>
+    ) -> Result<Response<SearchResponse>, Status> {
+        service::search::search(request).await
+    }
+
+    //TODO: Add basic utilities for database fetching
+
     async fn get_menu_item(
-        &self,
-        request: Request<GetMenuRequest>,
+        &self, request: Request<GetMenuRequest>
     ) -> Result<Response<GetMenuResponse>, Status> {
-        let resp = GetMenuResponse {
-            item: Some(MenuItem {
-                uuid: request.into_inner().uuid,
-                name: Some(
-                    LocalizedString { content: "Chicken Wings".to_string() , locale: "en".to_string() }
-                ),
-                price: 30.0,
-                ingredients: vec![
-                    Ingredient {
-                        uuid: "2".to_string(),
-                        name: Some(
-                            LocalizedString { content: "Chicken".to_string() , locale: "en".to_string() }
-                        )
-                    }
-                ],
-                image: "".to_string(),
-                tags: vec![]
-            })
-        };
-        Ok(Response::new(resp))
+        Ok(Response::new(GetMenuResponse {
+            item: None
+        }))
+    }
+
+    async fn get_stall(
+        &self, request: Request<GetStallRequest>
+    ) -> Result<Response<GetStallResponse>, Status> {
+        Ok(Response::new(GetStallResponse {
+            stall: None
+        }))
+    }
+
+    async fn get_review(
+        &self, request: Request<GetReviewRequest>
+    ) -> Result<Response<GetReviewResponse>, Status> {
+        Ok(Response::new(GetReviewResponse { 
+            review: None
+        }))
     }
 
 }

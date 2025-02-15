@@ -1,0 +1,4 @@
+[submodule "protocol"]
+	path = protocol
+	url = https://github.com/KU-Eater/KUEater-Protocol.git
+	branch = master

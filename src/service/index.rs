@@ -1,5 +1,8 @@
-use sqlx::PgPool;
+use sqlx::{types::{Uuid, Decimal}, PgPool, Row};
 use tonic::{Request, Response, Status};
+use num_traits::cast::ToPrimitive;
+
+use crate::service::kueater::{LocalizedString, MenuItem};
 
 use super::kueater::data::index::{
     GetMenuListingsRequest, GetMenuListingsResponse, CardedMenuItem,
@@ -48,12 +51,31 @@ pub async fn get_menu_listing(
             Err(_) => return Err(Status::resource_exhausted("No more results found for the menu listing"))
         };
     
+    let mut items: Vec<CardedMenuItem> = vec![];
     for row in result {
-        println!("{:?}", row);
+        items.push(CardedMenuItem {
+            item: Some(MenuItem {
+                uuid: String::from(row.get::<Uuid, &str>("id")),
+                name: Some(LocalizedString {
+                    content: row.get("name"),
+                    locale: String::from("en")
+                }),
+                price: row.get::<Decimal, &str>("price").to_f64().expect("Cannot parse price"),
+                ingredients: vec![],
+                image: String::from(""),
+                tags: vec![]
+            }),
+            stall_name: Some(LocalizedString { content: String::from("Test"), locale: String::from("en") }),
+            stall_lock: 1,
+            likes: 1,
+            liked_by_user: false,
+            disliked_by_user: false,
+            favorite_by_user: false
+        });
     }
 
     let data = GetMenuListingsResponse {
-        items: vec![],
+        items: items,
         next_page_token: String::from("")
     };
 

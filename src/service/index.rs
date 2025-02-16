@@ -2,7 +2,7 @@ use sqlx::{types::{Uuid, Decimal}, PgPool, Row};
 use tonic::{Request, Response, Status};
 use num_traits::cast::ToPrimitive;
 
-use crate::service::kueater::{LocalizedString, MenuItem};
+use crate::service::kueater::{Ingredient, LocalizedString, MenuItem};
 
 use super::kueater::data::index::{
     GetMenuListingsRequest, GetMenuListingsResponse, CardedMenuItem,
@@ -21,12 +21,23 @@ pub async fn get_menu_listing(
     let data = request.into_inner();
 
     let reversed_sorted: bool = data.reversed_sort;
-    let mut query = format!("SELECT * FROM {table}",
-        table="kueater.menuitem"
-    );
+    let mut query = format!("SELECT 
+    kueater.menuitem.id AS id,
+    kueater.menuitem.name AS name,
+    price,
+    array_agg(kueater.ingredient.name) AS ingredients,
+    kueater.menuitem.image AS image,
+    kueater.stall.name AS stall_name,
+    lock \
+    FROM kueater.menuitem
+    LEFT JOIN kueater.menu_ingredient ON kueater.menuitem.id = kueater.menu_ingredient.menu_id
+    LEFT JOIN kueater.ingredient ON kueater.menu_ingredient.ingredient_id = kueater.ingredient.id
+    JOIN kueater.stall_menu ON kueater.stall_menu.menu_id = kueater.menuitem.id
+    JOIN kueater.stall ON kueater.stall.id = kueater.stall_menu.stall_id");
 
     if !data.page_token.is_empty() {
-        query = format!("{} WHERE (id) {direction} ({token})", query,
+        query = format!("{}
+        WHERE (kueater.menuitem.id) {direction} ({token})", query,
             direction=(|| if reversed_sorted {
                 "<"
             } else {
@@ -36,12 +47,15 @@ pub async fn get_menu_listing(
         )
     }
 
-    query = format!("{} ORDER BY id {direction} LIMIT 10", query,
+    query = format!("{}
+    GROUP BY kueater.menuitem.id, kueater.menuitem.name, price, kueater.menuitem.image, kueater.stall.name, lock
+    ORDER BY kueater.menuitem.id {direction} LIMIT {limit}", query,
         direction=(|| if reversed_sorted {
             "DESC"
         } else {
             "ASC"
-        })()
+        })(),
+        limit="10"
     );
 
     let result = match sqlx::query(&query)
@@ -52,31 +66,50 @@ pub async fn get_menu_listing(
         };
     
     let mut items: Vec<CardedMenuItem> = vec![];
-    for row in result {
-        items.push(CardedMenuItem {
-            item: Some(MenuItem {
-                uuid: String::from(row.get::<Uuid, &str>("id")),
-                name: Some(LocalizedString {
-                    content: row.get("name"),
-                    locale: String::from("en")
+    for row in &result {
+        items.push(
+            CardedMenuItem {
+                item: Some(MenuItem {
+                    uuid: String::from(row.get::<Uuid, &str>("id")),
+                    name: Some(LocalizedString {
+                        content: row.get("name"),
+                        locale: String::from("en")
+                    }),
+                    price: row.get::<Decimal, &str>("price").to_f64().expect("Cannot parse price"),
+                    ingredients: {
+                        let ingredients_queried: Vec<String> = match row.try_get("ingredients") {
+                            Ok(v) => v,
+                            Err(_) => vec![]
+                        };
+                        let mut ingredients: Vec<Ingredient> = vec![];
+                        for i in ingredients_queried {
+                            ingredients.push(Ingredient {
+                                uuid: String::from(""),
+                                name: Some(LocalizedString {content: i, locale: String::from("en")})
+                            })
+                        };
+                        ingredients
+                    },
+                    image: String::from(""),
+                    tags: vec![]
                 }),
-                price: row.get::<Decimal, &str>("price").to_f64().expect("Cannot parse price"),
-                ingredients: vec![],
-                image: String::from(""),
-                tags: vec![]
-            }),
-            stall_name: Some(LocalizedString { content: String::from("Test"), locale: String::from("en") }),
-            stall_lock: 1,
-            likes: 1,
-            liked_by_user: false,
-            disliked_by_user: false,
-            favorite_by_user: false
-        });
+                stall_name: Some(LocalizedString { 
+                    content: row.get("stall_name"), locale: String::from("en") 
+                }),
+                stall_lock: row.get("lock"),
+                likes: 1,
+
+                // TODO: Respect user profile
+                liked_by_user: false,
+                disliked_by_user: false,
+                favorite_by_user: false
+            }
+        );
     }
 
     let data = GetMenuListingsResponse {
         items: items,
-        next_page_token: String::from("")
+        next_page_token: String::from(result.last().expect("Expected free token ID").get::<Uuid, &str>("id"))
     };
 
     Ok(Response::new(data))

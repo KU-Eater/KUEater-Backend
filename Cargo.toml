@@ -16,3 +16,14 @@ num-traits = "0.2"
 
 [build-dependencies]
 tonic-build = "0.12"
+
+[features]
+default = []
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[[bin]]
+name = "db-migrate"
+path = "src/bin/db-migrate.rs"

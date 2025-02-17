@@ -74,7 +74,6 @@ impl KuEaterBackend for BackendService {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let pg: PgPool = db::connect(var("DATABASE_URL")?).await?;
-    sqlx::migrate!().run(&pg).await?;
 
     let addr = "[::1]:50051".parse()?;
     let service = BackendService {
@@ -87,4 +86,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     
     Ok(())
+    
 }

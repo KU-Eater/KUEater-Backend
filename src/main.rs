@@ -40,19 +40,19 @@ impl KuEaterBackend for BackendService {
     async fn index_top_menu(
         &self, request: Request<TopMenuRequest>
     ) -> Result<Response<TopMenu>, Status> {
-        service::index::index_top_menu(request).await
+        service::index::index_top_menu(&self.pg_pool, request).await
     }
 
     async fn index_top_stall(
         &self, request: Request<TopStallRequest>
     ) -> Result<Response<TopStall>, Status> {
-        Err(Status::unimplemented("Unimplemented method"))
+        service::index::index_top_stall(&self.pg_pool, request).await
     }
 
     async fn search(
         &self, request: Request<SearchRequest>
     ) -> Result<Response<SearchResponse>, Status> {
-        service::search::search(request).await
+        service::search::search(&self.pg_pool, request).await
     }
 
     async fn post_review(

@@ -1,5 +1,12 @@
 use service::kueater::data::{
-    index::{GetMenuListingsRequest, GetMenuListingsResponse, TopMenu, TopMenuRequest}, ku_eater_backend_server::{KuEaterBackend, KuEaterBackendServer}, search::{SearchRequest, SearchResponse}, GetMenuRequest, GetMenuResponse, GetReviewRequest, GetReviewResponse, GetStallRequest, GetStallResponse
+    index::{GetMenuListingsRequest, GetMenuListingsResponse, TopMenu, TopMenuRequest, TopStall, TopStallRequest},
+    ku_eater_backend_server::{KuEaterBackend, KuEaterBackendServer}, search::{SearchRequest, SearchResponse},
+    GetMenuRequest, GetMenuResponse, GetReviewRequest, GetReviewResponse, GetStallRequest, GetStallResponse,
+    review::{PostReviewRequest, PostReviewResponse}
+};
+use service::kueater::debug::{
+    datagen::{CreateTestUserProfileRequest, CreateTestUserProfileResponse},
+    ku_eater_debug_server::{KuEaterDebug, KuEaterDebugServer}
 };
 use sqlx::{PgPool};
 use tonic::{transport::Server, Request, Response, Status};
@@ -36,10 +43,22 @@ impl KuEaterBackend for BackendService {
         service::index::index_top_menu(request).await
     }
 
+    async fn index_top_stall(
+        &self, request: Request<TopStallRequest>
+    ) -> Result<Response<TopStall>, Status> {
+        Err(Status::unimplemented("Unimplemented method"))
+    }
+
     async fn search(
         &self, request: Request<SearchRequest>
     ) -> Result<Response<SearchResponse>, Status> {
         service::search::search(request).await
+    }
+
+    async fn post_review(
+        &self, request: Request<PostReviewRequest>
+    ) -> Result<Response<PostReviewResponse>, Status> {
+        Err(Status::unimplemented("Unimplemented method"))
     }
 
     //TODO: Add basic utilities for database fetching
@@ -66,6 +85,29 @@ impl KuEaterBackend for BackendService {
 
 }
 
+// ---
+#[derive(Debug)]
+pub struct DebugService {
+    pg_pool: PgPool
+}
+
+impl DebugService {
+    pub fn new(pg_pool: PgPool) -> Self {
+        Self {
+            pg_pool
+        }
+    }
+}
+
+#[tonic::async_trait]
+impl KuEaterDebug for DebugService {
+    async fn create_test_user_profile(
+        &self, request: Request<CreateTestUserProfileRequest>
+    ) -> Result<Response<CreateTestUserProfileResponse>, Status> {
+        Err(Status::unimplemented("Unimplemented method"))
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
@@ -73,11 +115,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let addr = "[::1]:50051".parse()?;
     let service = BackendService {
-        pg_pool: pg
+        pg_pool: pg.clone()
+    };
+    
+    let debug_svc = DebugService {
+        pg_pool: pg.clone()
     };
 
     Server::builder()
         .add_service(KuEaterBackendServer::new(service))
+        .add_service(KuEaterDebugServer::new(debug_svc))
         .serve(addr)
         .await?;
     

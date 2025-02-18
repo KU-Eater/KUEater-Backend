@@ -11,4 +11,8 @@ fn main() {
         .build_client(false)
         .compile_protos(&["protocol/data/main.proto"], &["protocol"])
         .unwrap();
+    tonic_build::configure()
+        .build_client(false)
+        .compile_protos(&["protocol/debug/main.proto"], &["protocol"])
+        .unwrap();
 }

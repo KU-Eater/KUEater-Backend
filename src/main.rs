@@ -113,7 +113,8 @@ impl KuEaterDebug for DebugService {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    let pg: PgPool = db::connect(var("DATABASE_URL")?).await?;
+    println!("Trying to connect to PostgreSQL database...");
+    let pg: PgPool = db::connect(var("DATABASE_URL").expect("DATABASE_URL is not set or cannot be read")).await?;
 
     let addr = "[::1]:50051".parse()?;
     let service = BackendService {
@@ -124,12 +125,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pg_pool: pg.clone()
     };
 
+    println!("Starting gRPC server...");
+
     Server::builder()
+        .accept_http1(true)
         .add_service(KuEaterBackendServer::new(service))
         .add_service(KuEaterDebugServer::new(debug_svc))
         .serve(addr)
         .await?;
-    
+
     Ok(())
-    
 }

@@ -1,6 +1,6 @@
 use sqlx::{types::{Uuid, Decimal}, PgPool, Row};
 use tonic::{Request, Response, Status};
-use num_traits::cast::ToPrimitive;
+use num_traits::{cast::ToPrimitive, Zero};
 
 use crate::service::kueater::{Ingredient, LocalizedString, MenuItem};
 
@@ -9,12 +9,12 @@ use super::kueater::data::index::{
     TopMenu, TopMenuRequest, SortStrategy
 };
 
+const DEFAULT_PAGE_SIZE: i32 = 12;
+
 pub async fn get_menu_listing(
     pg_pool: &PgPool,
     request: Request<GetMenuListingsRequest>
 ) -> Result<Response<GetMenuListingsResponse>, Status> {
-
-    println!("Running menu listings");
 
     // TODO: Use sort strategy,
     // For now, let's get menu listing sortable by UUID
@@ -37,7 +37,7 @@ pub async fn get_menu_listing(
 
     if !data.page_token.is_empty() {
         query = format!("{}
-        WHERE (kueater.menuitem.id) {direction} ({token})", query,
+        WHERE (kueater.menuitem.id) {direction} ('{token}')", query,
             direction=(|| if reversed_sorted {
                 "<"
             } else {
@@ -55,14 +55,21 @@ pub async fn get_menu_listing(
         } else {
             "ASC"
         })(),
-        limit="10"
+        limit=(|| if data.page_size.is_zero() {
+            DEFAULT_PAGE_SIZE
+        } else {
+            data.page_size
+        })()
     );
 
     let result = match sqlx::query(&query)
         .fetch_all(pg_pool)
         .await {
             Ok(rows) => rows,
-            Err(_) => return Err(Status::resource_exhausted("No more results found for the menu listing"))
+            Err(e) => {
+                println!("{}", e);
+                return Err(Status::internal("Internal error"))
+            }
         };
     
     let mut items: Vec<CardedMenuItem> = vec![];
@@ -90,7 +97,7 @@ pub async fn get_menu_listing(
                         };
                         ingredients
                     },
-                    image: String::from(""),
+                    image: row.get("image"),
                     tags: vec![]
                 }),
                 stall_name: Some(LocalizedString { 
@@ -105,6 +112,11 @@ pub async fn get_menu_listing(
                 favorite_by_user: false
             }
         );
+    }
+
+    if items.is_empty() {
+        // If there's no result, just return end of page
+        return Err(Status::resource_exhausted("End of page"))
     }
 
     let data = GetMenuListingsResponse {

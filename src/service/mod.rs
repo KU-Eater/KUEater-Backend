@@ -11,5 +11,6 @@ pub mod kueater {
     }
 }
 
+pub mod fetch;
 pub mod index;
 pub mod search;

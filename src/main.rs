@@ -47,17 +47,13 @@ impl KuEaterBackend for BackendService {
     async fn get_menu_item(
         &self, request: Request<GetMenuRequest>
     ) -> Result<Response<GetMenuResponse>, Status> {
-        Ok(Response::new(GetMenuResponse {
-            item: None
-        }))
+        service::fetch::get_menu_item(&self.pg_pool, request).await
     }
 
     async fn get_stall(
         &self, request: Request<GetStallRequest>
     ) -> Result<Response<GetStallResponse>, Status> {
-        Ok(Response::new(GetStallResponse {
-            stall: None
-        }))
+        service::fetch::get_stall(&self.pg_pool, request).await
     }
 
     async fn get_review(

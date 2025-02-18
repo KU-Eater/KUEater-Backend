@@ -2,7 +2,7 @@ use service::kueater::data::{
     index::{GetMenuListingsRequest, GetMenuListingsResponse, TopMenu, TopMenuRequest, TopStall, TopStallRequest},
     ku_eater_backend_server::{KuEaterBackend, KuEaterBackendServer}, search::{SearchRequest, SearchResponse},
     GetMenuRequest, GetMenuResponse, GetReviewRequest, GetReviewResponse, GetStallRequest, GetStallResponse,
-    review::{PostReviewRequest, PostReviewResponse}
+    review::{PostReviewRequest, PostReviewResponse, ListReviewsRequest, ListReviewsResponse}
 };
 use service::kueater::debug::{
     datagen::{CreateTestUserProfileRequest, CreateTestUserProfileResponse},
@@ -55,13 +55,17 @@ impl KuEaterBackend for BackendService {
         service::search::search(&self.pg_pool, request).await
     }
 
+    async fn list_reviews(
+        &self, request: Request<ListReviewsRequest>
+    ) -> Result<Response<ListReviewsResponse>, Status> {
+        service::review::list_reviews(&self.pg_pool, request).await
+    }
+
     async fn post_review(
         &self, request: Request<PostReviewRequest>
     ) -> Result<Response<PostReviewResponse>, Status> {
-        Err(Status::unimplemented("Unimplemented method"))
+        service::review::post_review(&self.pg_pool, request).await
     }
-
-    //TODO: Add basic utilities for database fetching
 
     async fn get_menu_item(
         &self, request: Request<GetMenuRequest>
@@ -76,11 +80,9 @@ impl KuEaterBackend for BackendService {
     }
 
     async fn get_review(
-        &self, request: Request<GetReviewRequest>
+        &self, _request: Request<GetReviewRequest>
     ) -> Result<Response<GetReviewResponse>, Status> {
-        Ok(Response::new(GetReviewResponse { 
-            review: None
-        }))
+        Err(Status::unimplemented("Unimplemented"))
     }
 
 }

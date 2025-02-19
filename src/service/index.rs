@@ -19,6 +19,7 @@ pub async fn get_menu_listing(
     // TODO: Use sort strategy,
     // For now, let's get menu listing sortable by UUID
     let data = request.into_inner();
+    let mut started_where: bool = false;
 
     let reversed_sorted: bool = data.reversed_sort;
     let mut query = format!("SELECT 
@@ -44,7 +45,20 @@ pub async fn get_menu_listing(
                 ">"
             })(),
             token = data.page_token
-        )
+        );
+        started_where = true;
+    }
+
+    if !data.match_lock.is_zero() {
+        if !started_where {
+            query = format!("{}
+            WHERE kueater.stall.lock = {}
+            ", query, data.match_lock);
+            started_where = true;
+        } else {
+            query = format!("{} AND kueater.stall.lock = {}
+            ", query, data.match_lock)
+        }
     }
 
     query = format!("{}

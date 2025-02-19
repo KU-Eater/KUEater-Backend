@@ -31,7 +31,7 @@ pub async fn search(
         FROM kueater.menuitem
         JOIN kueater.stall_menu ON kueater.stall_menu.menu_id = kueater.menuitem.id
         JOIN kueater.stall ON kueater.stall.id = kueater.stall_menu.stall_id
-        WHERE kueater.menuitem.name LIKE '%{}%'
+        WHERE kueater.menuitem.name LIKE LOWER('%{}%')
         "
     , data.query);
 

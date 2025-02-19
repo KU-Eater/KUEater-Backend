@@ -18,8 +18,6 @@ pub async fn search(
 
     if data.query.is_empty() { return Err(Status::invalid_argument("Search query cannot be empty")) }
 
-    println!("Running search for: {}", data.query);
-
     // TODO: Use vectors and embeddings to power search instead.
 
     let menu_query = format!(

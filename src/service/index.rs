@@ -129,7 +129,7 @@ pub async fn get_menu_listing(
 
 pub async fn index_top_menu(
     pg_pool: &PgPool,
-    request: Request<TopMenuRequest>
+    _request: Request<TopMenuRequest>
 ) -> Result<Response<TopMenu>, Status> {
     let query = format!("SELECT
         kueater.menuitem.id AS id,
@@ -191,7 +191,7 @@ pub async fn index_top_menu(
 
 pub async fn index_top_stall(
     pg_pool: &PgPool,
-    request: Request<TopStallRequest>
+    _request: Request<TopStallRequest>
 ) -> Result<Response<TopStall>, Status> {
     let query = format!("SELECT
         kueater.stall.id AS id,

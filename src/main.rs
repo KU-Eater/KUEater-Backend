@@ -10,6 +10,7 @@ use service::kueater::debug::{
 };
 use sqlx::{PgPool};
 use tonic::{transport::Server, Request, Response, Status};
+use tonic_web::GrpcWebLayer;
 use std::env::var;
 
 mod service;
@@ -116,7 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Trying to connect to PostgreSQL database...");
     let pg: PgPool = db::connect(var("DATABASE_URL").expect("DATABASE_URL is not set or cannot be read")).await?;
 
-    let addr = "[::1]:50051".parse()?;
+    let addr = "0.0.0.0:50051".parse()?;
     let service = BackendService {
         pg_pool: pg.clone()
     };
@@ -129,6 +130,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Server::builder()
         .accept_http1(true)
+        .layer(tower_http::cors::CorsLayer::very_permissive())
+        .layer(GrpcWebLayer::new())
         .add_service(KuEaterBackendServer::new(service))
         .add_service(KuEaterDebugServer::new(debug_svc))
         .serve(addr)

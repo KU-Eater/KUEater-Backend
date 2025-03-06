@@ -11,7 +11,6 @@ use service::kueater::debug::{
 use sqlx::{PgPool};
 use tonic::{transport::Server, Request, Response, Status};
 use tonic_web::GrpcWebLayer;
-use tokio::signal::ctrl_c;
 use std::env::var;
 
 mod service;
@@ -112,6 +111,32 @@ impl KuEaterDebug for DebugService {
     }
 }
 
+#[cfg(unix)]
+async fn shutdown_signal_recv() -> std::io::Result<()> {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let mut sigterm = signal(SignalKind::terminate()).unwrap();
+    let mut sigint = signal(SignalKind::interrupt()).unwrap();
+
+    tokio::select! {
+        _ = sigterm.recv() => Ok(()),
+        _ = sigint.recv() => Ok(())
+    }
+}
+
+#[cfg(windows)]
+async fn shutdown_signal_recv() -> std::io::Result<()> {
+    use tokio::signal::windows::{ctrl_c, ctrl_close};
+
+    let mut ctrlc = ctrl_c().unwrap();
+    let mut ctrlclose = ctrl_close().unwrap();
+
+    tokio::select! {
+        _ = ctrlc.recv() => Ok(()),
+        _ = ctrlclose.recv() => Ok(())
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
@@ -136,7 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(KuEaterBackendServer::new(service))
         .add_service(KuEaterDebugServer::new(debug_svc))
         .serve_with_shutdown(addr, async {
-            ctrl_c().await.ok();
+            shutdown_signal_recv().await.ok();
         })
         .await?;
 

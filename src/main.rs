@@ -11,6 +11,7 @@ use service::kueater::debug::{
 use sqlx::{PgPool};
 use tonic::{transport::Server, Request, Response, Status};
 use tonic_web::GrpcWebLayer;
+use tokio::signal::ctrl_c;
 use std::env::var;
 
 mod service;
@@ -134,8 +135,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(GrpcWebLayer::new())
         .add_service(KuEaterBackendServer::new(service))
         .add_service(KuEaterDebugServer::new(debug_svc))
-        .serve(addr)
+        .serve_with_shutdown(addr, async {
+            ctrl_c().await.ok();
+        })
         .await?;
+
+    pg.close().await;
 
     Ok(())
 }

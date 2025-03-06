@@ -1,0 +1,46 @@
+# For development environment only,
+
+name: "ku-eater-backend-stack"
+
+services:
+  db:
+    image: ghcr.io/ku-eater/postgres:pg17-latest
+    volumes:
+      - ku-eater-data:/var/lib/postgresql/data
+      - type: bind
+        source: ./init.sql
+        target: /docker-entrypoint-initdb.d/init.sql
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready", "-d", "kueater", "-U", "user"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: kueater
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1gb
+  server:
+    image: ghcr.io/ku-eater/backend:latest
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgres://user:password@db:5432/kueater"
+    links:
+      - db
+    ports:
+      - '50051:50051'
+    deploy:
+      resources:
+        limits:
+          memory: 1gb
+
+volumes:
+  ku-eater-data:

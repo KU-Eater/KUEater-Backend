@@ -11,6 +11,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS kueater.embeddings (
     object_id UUID NOT NULL,
     object_type kueater.object_type NOT NULL,
+    string TEXT NOT NULL,
     lang TEXT NOT NULL,
     embedding vector(768) NOT NULL
 );
@@ -91,3 +92,47 @@ CREATE TABLE IF NOT EXISTS kueater.ingredient_allergen_score (
     allergen kueater.allergen NOT NULL,
     score DECIMAL DEFAULT 1
 );
+
+-- Function to use User Preference to list scores of Diet and Allergen of given Menu Item
+CREATE OR REPLACE FUNCTION kueater.get_menuitem_compatibility(
+    p_menu_id UUID,
+    p_user_id UUID
+)
+RETURNS TABLE (
+    ingredient_id UUID,
+    ingredient_name TEXT,
+    diet_scores JSONB,
+    allergen_scores JSONB
+)
+LANGUAGE plpgsql AS
+$$
+BEGIN
+    RETURN QUERY
+    WITH menu_ingredients AS (
+        SELECT mi.ingredient_id, i.name AS ingredient_name
+        FROM kueater.menu_ingredient AS mi
+        JOIN kueater.ingredient i ON mi.ingredient_id = i.id
+        WHERE mi.menu_id = p_menu_id
+    )
+    SELECT
+        mi.ingredient_id,
+        mi.ingredient_name,
+        (
+            SELECT json_object_agg(
+                ids.diet::text,
+                ids.score
+            )
+            FROM kueater.ingredient_diet_score ids
+            WHERE ids.ingredient_id = mi.ingredient_id
+        ) AS diet_scores,
+        (
+            SELECT json_object_agg(
+                ias.allergen::text,
+                ias.score
+            )
+            FROM kueater.ingredient_allergen_score ias
+            WHERE ias.ingredient_id = mi.ingredient_id
+        ) AS allergen_scores
+    FROM menu_ingredients mi;
+END;
+$$;

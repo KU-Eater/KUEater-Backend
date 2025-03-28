@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS kueater.stall (
     name TEXT NOT NULL,
     lock INTEGER,
     image TEXT,
-    dish_type TEXT
+    open_hour TEXT,
+    close_hour TEXT,
+    tags TEXT
 );
 
 CREATE TABLE IF NOT EXISTS kueater.stall_menu (
@@ -34,32 +36,53 @@ CREATE TABLE IF NOT EXISTS kueater.stall_menu (
     PRIMARY KEY (stall_id, menu_id)
 );
 
--- User personal domain
+-- User personalization domain
 
 DO $$ BEGIN
-    CREATE TYPE kueater.restraint_type AS ENUM ('allergic', 'religional');
+    CREATE TYPE kueater.diet AS ENUM (
+        'Halal', 'Vegetarian', 'Vegan', 'Pescatarian', 
+        'Pollotarian', 'Low-Carb', 'Keto', 'Low-Fat', 'High-Protein'
+    );
+    CREATE TYPE kueater.allergen AS ENUM (
+        'Lactose', 'Eggs', 'Shellfish', 'Fishes', 'Seafood',
+        'Peanuts', 'Gluten', 'Sesame', 'Nuts', 'Soy', 'Rice',
+        'Red Meat', 'Corn', 'Wheat', 'Fructose', 'Chocolate', 
+        'Msg'
+    );
+    CREATE TYPE kueater.gender AS ENUM (
+        'Male', 'Female', 'Non-Binary', 'Prefer not to say'
+    );
+    CREATE TYPE kueater.role AS ENUM (
+        'KU Student', 'Exchange Student', 'KU Professor', 'KU Staff', 'Guest'
+    );
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
-CREATE TABLE IF NOT EXISTS kueater.dietary_restriction (
+CREATE TABLE IF NOT EXISTS kueater.user_preferences (
     id BIGSERIAL PRIMARY KEY,
-    ingredient_id UUID REFERENCES kueater.ingredient ON DELETE RESTRICT,
-    type kueater.restraint_type NOT NULL
+    diets kueater.diet ARRAY,
+    allergies kueater.allergen ARRAY,
+    cuisines TEXT ARRAY,
+    disliked_ingredients TEXT ARRAY,
+    favorite_dishes TEXT ARRAY
 );
 
 CREATE TABLE IF NOT EXISTS kueater.userprofile (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v7(),
-    name VARCHAR(30) NOT NULL
+    name VARCHAR(30) NOT NULL,
+    email TEXT,
+    gender kueater.gender DEFAULT 'Prefer not to say',
+    role kueater.role DEFAULT 'Guest'
 );
 
-CREATE TABLE IF NOT EXISTS kueater.user_dietary_restraint (
+CREATE TABLE IF NOT EXISTS kueater.user_profile_preferences (
     user_id UUID REFERENCES kueater.userprofile ON DELETE CASCADE,
-    restraint_id BIGINT REFERENCES kueater.dietary_restriction ON DELETE CASCADE,
-    PRIMARY KEY (user_id, restraint_id)
+    preferences_id BIGINT REFERENCES kueater.dietary_restriction ON DELETE SET NULL,
+    PRIMARY KEY user_id
 );
 
--- relationship profiles and items/stalls
+-- Relationship profiles and items/stalls
 
 CREATE TABLE IF NOT EXISTS kueater.liked_item (
     user_id UUID REFERENCES kueater.userprofile ON DELETE CASCADE,
@@ -79,13 +102,13 @@ CREATE TABLE IF NOT EXISTS kueater.disliked_item (
     PRIMARY KEY (user_id, menu_id)
 );
 
-CREATE TABLE IF NOT EXISTS kueater.favorite_item (
+CREATE TABLE IF NOT EXISTS kueater.saved_item (
     user_id UUID REFERENCES kueater.userprofile ON DELETE CASCADE,
     menu_id UUID REFERENCES kueater.menuitem ON DELETE CASCADE,
     PRIMARY KEY (user_id, menu_id)
 );
 
-CREATE TABLE IF NOT EXISTS kueater.favorite_stall (
+CREATE TABLE IF NOT EXISTS kueater.saved_stall (
     user_id UUID REFERENCES kueater.userprofile ON DELETE CASCADE,
     stall_id UUID REFERENCES kueater.stall ON DELETE CASCADE,
     PRIMARY KEY (user_id, stall_id)

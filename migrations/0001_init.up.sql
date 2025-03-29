@@ -79,9 +79,8 @@ CREATE TABLE IF NOT EXISTS kueater.userprofile (
 );
 
 CREATE TABLE IF NOT EXISTS kueater.user_profile_preferences (
-    user_id UUID REFERENCES kueater.userprofile ON DELETE CASCADE,
+    user_id UUID REFERENCES kueater.userprofile ON DELETE CASCADE PRIMARY KEY,
     preferences_id BIGINT REFERENCES kueater.dietary_restriction ON DELETE SET NULL,
-    PRIMARY KEY user_id
 );
 
 -- Relationship profiles and items/stalls

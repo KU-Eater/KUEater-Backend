@@ -59,7 +59,7 @@ DO $$ BEGIN
     );
 EXCEPTION
     WHEN duplicate_object THEN null;
-END $$;
+END; $$;
 
 CREATE TABLE IF NOT EXISTS kueater.user_preferences (
     id BIGSERIAL PRIMARY KEY,
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS kueater.userprofile (
 
 CREATE TABLE IF NOT EXISTS kueater.user_profile_preferences (
     user_id UUID REFERENCES kueater.userprofile ON DELETE CASCADE PRIMARY KEY,
-    preferences_id BIGINT REFERENCES kueater.dietary_restriction ON DELETE SET NULL,
+    preferences_id BIGINT REFERENCES kueater.user_preferences ON DELETE SET NULL
 );
 
 -- Relationship profiles and items/stalls

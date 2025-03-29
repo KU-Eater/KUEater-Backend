@@ -13,7 +13,7 @@ services:
         read_only: true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready", "-d", "kueater", "-U", "user"]
-      interval: 30s
+      interval: 10s
       timeout: 30s
       retries: 3
     environment:
@@ -24,12 +24,17 @@ services:
       LANG: "en_US.UTF-8"
       LC_ALL: "en_US.UTF-8"
     restart: always
+    ports:
+      - '5432:5432'
     deploy:
       resources:
         limits:
           memory: 1gb
   server:
     image: ghcr.io/ku-eater/backend:latest
+    build:
+      context: ..
+      dockerfile: ./docker/Dockerfile
     restart: always
     depends_on:
       db:

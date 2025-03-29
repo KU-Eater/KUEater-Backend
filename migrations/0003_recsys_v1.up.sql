@@ -3,10 +3,10 @@
 DO $$ BEGIN
     CREATE TYPE kueater.object_type AS ENUM (
         'ingredient', 'menuitem', 'stall'
-    )
+    );
 EXCEPTION
     WHEN duplicate_object THEN null;
-END $$;
+END; $$;
 
 CREATE TABLE IF NOT EXISTS kueater.embeddings (
     object_id UUID NOT NULL,
@@ -83,7 +83,7 @@ BEGIN
     RETURN QUERY
     SELECT
         tbl.menu_id,
-        tbl.score,
+        tbl.score
     FROM kueater.current_menuitem_scores tbl
     WHERE tbl.user_id = p_user_id
     ORDER BY tbl.score DESC

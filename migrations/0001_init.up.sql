@@ -11,7 +11,9 @@ CREATE TABLE IF NOT EXISTS kueater.menuitem (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v7(),
     name TEXT NOT NULL,
     price NUMERIC(6, 2) NOT NULL,
-    image TEXT
+    image TEXT,
+    cuisine TEXT,
+    food_type TEXT
 );
 
 CREATE TABLE IF NOT EXISTS kueater.menu_ingredient (

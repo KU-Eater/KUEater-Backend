@@ -16,6 +16,18 @@ CREATE TABLE IF NOT EXISTS kueater.embeddings (
     embedding vector(768) NOT NULL
 );
 
+-- Index for embeddings
+CREATE INDEX idx_embeddings_id_type ON kueater.embeddings (object_id, object_type);
+
+CREATE INDEX IF NOT EXISTS idx_embeddings_menuitem_vector ON kueater.embeddings USING vectors (embedding vector_cos_ops)
+WHERE (object_type = 'menuitem');
+
+CREATE INDEX IF NOT EXISTS idx_embeddings_ingredient_vector ON kueater.embeddings USING vectors (embedding vector_cos_ops)
+WHERE (object_type = 'ingredient');
+
+CREATE INDEX IF NOT EXISTS idx_embeddings_stall_vector ON kueater.embeddings USING vectors (embedding vector_cos_ops)
+WHERE (object_type = 'stall');
+
 CREATE TABLE IF NOT EXISTS kueater.menuitem_scores (
     id SERIAL PRIMARY KEY,
     user_id UUID REFERENCES kueater.userprofile ON DELETE CASCADE,
@@ -94,7 +106,7 @@ CREATE TABLE IF NOT EXISTS kueater.ingredient_allergen_score (
 );
 
 -- Function to use User Preference to list scores of Diet and Allergen of given Menu Item
-CREATE OR REPLACE FUNCTION kueater.get_menuitem_compatibility(
+CREATE OR REPLACE FUNCTION kueater.get_menuitem_compatibility_score(
     p_menu_id UUID,
     p_user_id UUID
 )

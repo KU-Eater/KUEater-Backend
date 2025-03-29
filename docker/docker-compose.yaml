@@ -20,6 +20,9 @@ services:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: kueater
+      LANGUAGE: "en_US.UTF-8"
+      LANG: "en_US.UTF-8"
+      LC_ALL: "en_US.UTF-8"
     restart: always
     deploy:
       resources:

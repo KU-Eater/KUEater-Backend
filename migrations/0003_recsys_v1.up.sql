@@ -95,14 +95,16 @@ $$;
 CREATE TABLE IF NOT EXISTS kueater.ingredient_diet_score (
     ingredient_id UUID REFERENCES kueater.ingredient ON DELETE CASCADE,
     diet kueater.diet NOT NULL,
-    score DECIMAL DEFAULT 0
+    score DECIMAL DEFAULT 0,
+    PRIMARY KEY (ingredient_id, diet)
 );
 
 -- Table for storing allergen score in each ingredient
 CREATE TABLE IF NOT EXISTS kueater.ingredient_allergen_score (
     ingredient_id UUID REFERENCES kueater.ingredient ON DELETE CASCADE,
     allergen kueater.allergen NOT NULL,
-    score DECIMAL DEFAULT 1
+    score DECIMAL DEFAULT 1,
+    PRIMARY KEY (ingredient_id, allergen)
 );
 
 -- Function to use User Preference to list scores of Diet and Allergen of given Menu Item

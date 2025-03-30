@@ -1,16 +1,37 @@
-use sqlx::{PgPool, Row, types::{Uuid, Decimal}};
+use sqlx::{types::{Decimal, Uuid}, PgPool, Row};
 use tonic::{Request, Response, Status};
+use tokio::sync::oneshot;
 use num_traits::ToPrimitive;
 
-use crate::service::kueater::{MenuItem,LocalizedString,};
+use crate::{agent::command::{AgentCommand, Command}, service::kueater::{LocalizedString, MenuItem}, AgentCommandSender};
 
 use super::kueater::data::search::{
-    SearchRequest, SearchResponse, CardedMenuItem, CardedStall, SortStrategy,
-    search_response::SearchResult, search_response::search_result::Result::{Item, Stall}
+    search_response::{search_result::Result::Item, SearchResult}, CardedMenuItem, SearchRequest, SearchResponse
 };
+
+
+struct SearchEntry {
+    id: String,
+    name: String,
+    price: f64,
+    image: String,
+    stall_name: String,
+    stall_lock: i32,
+    likes: i32,
+    liked_by_user: bool,
+    disliked_by_user: bool,
+    saved_by_user: bool
+}
+
+impl PartialEq for SearchEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
 
 pub async fn search(
     pg_pool: &PgPool,
+    sender: &AgentCommandSender,
     request: Request<SearchRequest>
 ) -> Result<Response<SearchResponse>, Status> {
 
@@ -19,21 +40,111 @@ pub async fn search(
     if data.query.is_empty() { return Err(Status::invalid_argument("Search query cannot be empty")) }
 
     // TODO: Use vectors and embeddings to power search instead.
+    let (tx, rx) = oneshot::channel::<String>();
+
+    sender.send(AgentCommand {
+        msg: Command::Search { query: data.query.clone() },
+        tx: tx
+    }).await.unwrap();
+
+    let mut vector_search_flag = true;
+    let mut search_results: Vec<SearchEntry> = vec![];
+    let vectors = rx.await.map_err(|_| { vector_search_flag = false });
+
+    if vector_search_flag {
+        let query = format!(
+            "SELECT
+            object_id,
+            1 - (embedding <=> '{}') AS similarity,
+            mi.name AS name,
+            price,
+            mi.image AS image,
+            st.name AS stall_name,
+            lock,
+            COUNT(likes.menu_id) AS likes,
+            COALESCE(BOOL_OR(liked.user_id IS NOT NULL), FALSE) AS liked,
+            COALESCE(BOOL_OR(disliked.user_id IS NOT NULL), FALSE) AS disliked,
+            COALESCE(BOOL_OR(saved.user_id IS NOT NULL), FALSE) AS saved
+            FROM kueater.embeddings e
+            JOIN kueater.menuitem mi ON e.object_id = mi.id
+            JOIN kueater.stall_menu stm ON stm.menu_id = mi.id
+            JOIN kueater.stall st ON st.id = stm.stall_id
+            LEFT JOIN kueater.liked_item likes ON likes.menu_id = mi.id
+            LEFT JOIN kueater.liked_item liked ON 
+                (liked.menu_id = mi.id AND liked.user_id = '{uid}')
+            LEFT JOIN kueater.disliked_item disliked ON 
+                (disliked.menu_id = mi.id AND disliked.user_id = '{uid}')
+            LEFT JOIN kueater.saved_item saved ON 
+                (saved.menu_id = mi.id AND saved.user_id = '{uid}')
+            WHERE object_type = 'menuitem'
+            GROUP BY 
+                object_id, 
+                similarity, 
+                mi.name, 
+                price, 
+                mi.image, 
+                st.name, 
+                lock
+            ORDER BY similarity DESC
+            LIMIT 100
+            "
+        , vectors.unwrap(), uid=data.user);
+        let results = match sqlx::query(&query).fetch_all(pg_pool).await {
+            Err(e) => {
+                println!("{}", e);
+                return Err(Status::internal("Internal error"))
+            }
+            Ok(v) => v
+        };
+        for row in results {
+            search_results.push(SearchEntry {
+                id: row.get::<Uuid, &str>("object_id").to_string(),
+                name: row.get("name"),
+                price: row.get::<Decimal, &str>("price").to_f64().unwrap(),
+                image: row.get("image"),
+                stall_name: row.get("stall_name"),
+                stall_lock: row.get("lock"),
+                likes: row.get::<i64, &str>("likes").to_i32().unwrap(),
+                liked_by_user: row.get::<bool, &str>("liked"),
+                disliked_by_user: row.get::<bool, &str>("disliked"),
+                saved_by_user: row.get::<bool, &str>("saved")
+            });
+        };
+    }
 
     let menu_query = format!(
-        "SELECT
-        kueater.menuitem.id AS id,
-        kueater.menuitem.name AS name,
-        price,
-        kueater.menuitem.image AS image,
-        kueater.stall.name AS stall_name,
-        lock
-        FROM kueater.menuitem
-        JOIN kueater.stall_menu ON kueater.stall_menu.menu_id = kueater.menuitem.id
-        JOIN kueater.stall ON kueater.stall.id = kueater.stall_menu.stall_id
-        WHERE kueater.menuitem.name LIKE '%{}%'
         "
-    , data.query);
+        SELECT
+        mi.id AS id,
+        mi.name AS name,
+        price,
+        mi.image AS image,
+        st.name AS stall_name,
+        lock,
+        COUNT(likes.menu_id) AS likes,
+        COALESCE(BOOL_OR(liked.user_id IS NOT NULL), FALSE) AS liked,
+        COALESCE(BOOL_OR(disliked.user_id IS NOT NULL), FALSE) AS disliked,
+        COALESCE(BOOL_OR(saved.user_id IS NOT NULL), FALSE) AS saved
+        FROM kueater.menuitem mi
+        JOIN kueater.stall_menu stm ON stm.menu_id = mi.id
+        JOIN kueater.stall st ON st.id = stm.stall_id
+        LEFT JOIN kueater.liked_item likes ON likes.menu_id = mi.id
+        LEFT JOIN kueater.liked_item liked ON 
+            (liked.menu_id = mi.id AND liked.user_id = '{uid}')
+        LEFT JOIN kueater.disliked_item disliked ON 
+            (disliked.menu_id = mi.id AND disliked.user_id = '{uid}')
+        LEFT JOIN kueater.saved_item saved ON 
+            (saved.menu_id = mi.id AND saved.user_id = '{uid}')
+        WHERE mi.name ILIKE '%{}%'
+        GROUP BY 
+            mi.id,
+            mi.name, 
+            price, 
+            mi.image, 
+            st.name, 
+            lock
+        "
+    , data.query, uid=data.user);
 
     let menus = match sqlx::query(&menu_query).fetch_all(pg_pool).await {
         Err(e) => {
@@ -43,38 +154,56 @@ pub async fn search(
         Ok(v) => v
     };
 
-    // TODO: Stall querying
+    for row in menus {
+        search_results.insert(0, SearchEntry {
+            id: row.get::<Uuid, &str>("id").to_string(),
+            name: row.get("name"),
+            price: row.get::<Decimal, &str>("price").to_f64().unwrap(),
+            image: row.get("image"),
+            stall_name: row.get("stall_name"),
+            stall_lock: row.get("lock"),
+            likes: row.get::<i64, &str>("likes").to_i32().unwrap(),
+            liked_by_user: row.get::<bool, &str>("liked"),
+            disliked_by_user: row.get::<bool, &str>("disliked"),
+            saved_by_user: row.get::<bool, &str>("saved")
+        });
+    }
+
+    search_results.dedup();
 
     let mut results: Vec<SearchResult> = vec![];
-    for row in menus {
+    for row in search_results {
         results.push(
-            SearchResult { result: Some(
-                Item(
-                    CardedMenuItem {
+            SearchResult {
+                result: Some(
+                    Item(CardedMenuItem {
                         item: Some(MenuItem {
-                            uuid: String::from(row.get::<Uuid, &str>("id")),
-                            name: Some(LocalizedString {
-                                content: row.get("name"),
-                                locale: String::from("en")
-                            }),
-                            price: row.get::<Decimal, &str>("price").to_f64().expect("Cannot parse price"),
+                            uuid: row.id,
+                            name: Some(
+                                LocalizedString {
+                                    content: row.name,
+                                    locale: String::from("en")
+                                }
+                            ),
+                            price: row.price,
                             ingredients: vec![],
-                            image: row.get("image"),
+                            image: row.image,
                             tags: vec![]
                         }),
-                        stall_name: Some(LocalizedString { 
-                            content: row.get("stall_name"), locale: String::from("en") 
-                        }),
-                        stall_lock: row.get("lock"),
-                        likes: 1,
-                
-                        // TODO: Respect user profile
-                        liked_by_user: false,
-                        disliked_by_user: false,
-                        favorite_by_user: false
-                    }
+                        stall_name: Some(
+                            LocalizedString {
+                                content: row.stall_name,
+                                locale: String::from("en")
+                            }
+                        ),
+                        stall_lock: row.stall_lock,
+                        likes: row.likes,
+                        liked_by_user: row.liked_by_user,
+                        disliked_by_user: row.disliked_by_user,
+                        favorite_by_user: row.saved_by_user
+                    })
                 )
-            ) }
+            }
         );
     }
 

@@ -1,3 +1,4 @@
+use http::Uri;
 use service::kueater::data::{
     index::{GetMenuListingsRequest, GetMenuListingsResponse, TopMenu, TopMenuRequest, TopStall, TopStallRequest},
     ku_eater_backend_server::{KuEaterBackend, KuEaterBackendServer}, search::{SearchRequest, SearchResponse},
@@ -8,7 +9,11 @@ use service::kueater::debug::{
     datagen::{CreateTestUserProfileRequest, CreateTestUserProfileResponse},
     ku_eater_debug_server::{KuEaterDebug, KuEaterDebugServer}
 };
+use agent::{command::{AgentCommand, Command}, kueater_agent::{self, ku_eater_embedding_agent_client::KuEaterEmbeddingAgentClient}};
 use sqlx::{PgPool};
+use tokio::{
+    sync::mpsc
+};
 use tonic::{transport::Server, Request, Response, Status};
 use tonic_web::GrpcWebLayer;
 use std::env::var;
@@ -16,17 +21,21 @@ use std::env::var;
 mod service;
 mod db;
 mod middleware;
-mod client;
+mod agent;
+
+type AgentCommandSender = mpsc::Sender<AgentCommand>;
 
 #[derive(Debug)]
 pub struct BackendService {
-    pg_pool: PgPool
+    pg_pool: PgPool,
+    sender: AgentCommandSender
 }
 
 impl BackendService {
-    pub fn new(pg_pool: PgPool) -> Self {
+    pub fn new(pg_pool: PgPool, sender: AgentCommandSender) -> Self {
         Self {
-            pg_pool
+            pg_pool,
+            sender
         }
     }
 }
@@ -55,7 +64,7 @@ impl KuEaterBackend for BackendService {
     async fn search(
         &self, request: Request<SearchRequest>
     ) -> Result<Response<SearchResponse>, Status> {
-        service::search::search(&self.pg_pool, request).await
+        service::search::search(&self.pg_pool, &self.sender, request).await
     }
 
     async fn list_reviews(
@@ -145,27 +154,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Trying to connect to PostgreSQL database...");
     let pg: PgPool = db::connect(var("DATABASE_URL").expect("DATABASE_URL is not set or cannot be read")).await?;
 
-    let addr = "0.0.0.0:50051".parse()?;
-    let service = BackendService {
-        pg_pool: pg.clone()
-    };
-    
-    let debug_svc = DebugService {
-        pg_pool: pg.clone()
-    };
+    let sv_addr = "0.0.0.0:50051".parse()?;
+    let agent_addr = var("AGENT_URL").unwrap_or(String::from("http://127.0.0.1:50052")).parse::<Uri>()?;
 
     println!("Starting gRPC server...");
 
-    Server::builder()
-        .accept_http1(true)
-        .layer(tower_http::cors::CorsLayer::very_permissive())
-        .layer(GrpcWebLayer::new())
-        .add_service(KuEaterBackendServer::new(service))
-        .add_service(KuEaterDebugServer::new(debug_svc))
-        .serve_with_shutdown(addr, async {
-            shutdown_signal_recv().await.ok();
-        })
-        .await?;
+    let (tx, mut rx) = mpsc::channel::<AgentCommand>(1024);
+
+    let pg_inner = pg.clone();
+    let server_tx = tx.clone();
+
+    let sv = tokio::spawn(async move {
+        let service = BackendService {
+            pg_pool: pg_inner.clone(),
+            sender: server_tx
+        };
+
+        let debug_svc = DebugService {
+            pg_pool: pg_inner.clone()
+        };
+
+        Server::builder()
+            .accept_http1(true)
+            .layer(tower_http::cors::CorsLayer::very_permissive())
+            .layer(GrpcWebLayer::new())
+            .add_service(KuEaterBackendServer::new(service))
+            .add_service(KuEaterDebugServer::new(debug_svc))
+            .serve_with_shutdown(sv_addr, async {
+                shutdown_signal_recv().await.ok();
+            })
+            .await.unwrap();
+    });
+
+    let _agt = tokio::spawn(async move {
+        let mut client = KuEaterEmbeddingAgentClient::connect(agent_addr).await.expect(
+            "Failed to connect to agent service"
+        );
+
+        println!("Connected to an agent service");
+
+        while let Some(incoming) = rx.recv().await {
+            match incoming.msg {
+                Command::Search {query} => {
+                    let request = Request::new(kueater_agent::GetEmbeddingRequest {
+                        text: query.into()
+                    });
+                    let response = client.get_embedding(request).await.unwrap();
+                    let vectors = response.into_inner().vectors;
+                    incoming.tx.send(vectors).unwrap_or_else(|_| println!("Error while sending back search vectors"));
+                },
+                Command::Recommend {user_id} => {
+                    let request = Request::new(kueater_agent::NewRecommendationsRequest {
+                        user_id: user_id.into()
+                    });
+                    client.new_recommendations(request).await.unwrap();
+                }
+            }
+        }
+    });
+
+    sv.await.unwrap();
 
     pg.close().await;
 

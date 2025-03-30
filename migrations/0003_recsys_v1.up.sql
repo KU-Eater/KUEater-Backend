@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS kueater.menuitem_scores (
     user_id UUID REFERENCES kueater.userprofile ON DELETE CASCADE,
     menu_id UUID REFERENCES kueater.menuitem ON DELETE CASCADE,
     score DECIMAL NOT NULL,
-    reasoning TEXT DEFAULT "",
+    reasoning TEXT DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     stale BOOLEAN DEFAULT FALSE
 );
@@ -51,7 +51,7 @@ FROM kueater.menuitem_scores
 WHERE stale = FALSE
 ORDER BY score DESC;
 
-CREATE UNIQUE INDEX unique_current_menuitem_scores ON kueater.embeddings (id);
+CREATE UNIQUE INDEX unique_current_menuitem_scores ON kueater.current_menuitem_scores (id);
 
 -- Function to stale the scores of user
 CREATE OR REPLACE FUNCTION kueater.stale_menuitem_scores_of(p_user_id UUID)

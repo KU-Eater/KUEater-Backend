@@ -34,7 +34,6 @@ AS $$
 BEGIN
     UPDATE kueater.activity_tally_counter
     SET count = 0
-    WHERE user_id = p_user_id
-    RETURNING count INTO new_count;
+    WHERE user_id = p_user_id;
 END;
 $$ LANGUAGE plpgsql;

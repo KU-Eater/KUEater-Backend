@@ -15,6 +15,7 @@ use std::env::var;
 
 mod service;
 mod db;
+mod middleware;
 
 #[derive(Debug)]
 pub struct BackendService {

@@ -56,13 +56,7 @@ pub async fn list_reviews(
     for row in result {
         reviews.push(Review {
             uuid: String::from(row.get::<Uuid, &str>("id")),
-            author: Some(UserProfile {
-                uuid: String::from(row.get::<Uuid, &str>("author")),
-                name: String::from("User"),
-                liked_items: None,
-                liked_stalls: None,
-                restraint: None
-            }),
+            author: None,
             stall: Some(Stall {
                 uuid: data.stall.clone(),
                 name: Some( LocalizedString {content: row.get("stall"), locale: String::from("en") } ),

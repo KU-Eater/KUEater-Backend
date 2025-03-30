@@ -63,11 +63,11 @@ END; $$;
 
 CREATE TABLE IF NOT EXISTS kueater.user_preferences (
     id BIGSERIAL PRIMARY KEY,
-    diets kueater.diet ARRAY,
-    allergies kueater.allergen ARRAY,
-    cuisines TEXT ARRAY,
-    disliked_ingredients TEXT ARRAY,
-    favorite_dishes TEXT ARRAY
+    diets kueater.diet ARRAY DEFAULT '{}',
+    allergies kueater.allergen ARRAY DEFAULT '{}',
+    cuisines TEXT ARRAY DEFAULT '{}',
+    disliked_ingredients TEXT ARRAY DEFAULT '{}',
+    favorite_dishes TEXT ARRAY DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS kueater.userprofile (

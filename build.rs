@@ -16,6 +16,10 @@ fn main() {
         .compile_protos(&["protocol/debug/main.proto"], &["protocol"])
         .unwrap();
     tonic_build::configure()
+        .build_client(false)
+        .compile_protos(&["protocol/auth/main.proto"], &["protocol"])
+        .unwrap();
+    tonic_build::configure()
         .build_client(true)
         .build_server(false)
         .compile_protos(&["protocol/agent/main.proto"], &["protocol"])

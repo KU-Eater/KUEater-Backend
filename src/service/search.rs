@@ -39,7 +39,6 @@ pub async fn search(
 
     if data.query.is_empty() { return Err(Status::invalid_argument("Search query cannot be empty")) }
 
-    // TODO: Use vectors and embeddings to power search instead.
     let (tx, rx) = oneshot::channel::<String>();
 
     sender.send(AgentCommand {

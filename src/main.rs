@@ -1,4 +1,5 @@
 use http::Uri;
+use middleware::{google_auth::{AuthLayer, GoogleAuthClientInfo}, kueater_auth::{self, auth_service_server::{AuthService, AuthServiceServer}}};
 use service::kueater::data::{
     index::{GetMenuListingsRequest, GetMenuListingsResponse, TopMenu, TopMenuRequest, TopStall, TopStallRequest},
     ku_eater_backend_server::{KuEaterBackend, KuEaterBackendServer}, search::{SearchRequest, SearchResponse},
@@ -10,13 +11,12 @@ use service::kueater::debug::{
     ku_eater_debug_server::{KuEaterDebug, KuEaterDebugServer}
 };
 use agent::{command::{AgentCommand, Command}, kueater_agent::{self, ku_eater_embedding_agent_client::KuEaterEmbeddingAgentClient}};
-use sqlx::{PgPool};
-use tokio::{
-    sync::mpsc
-};
+use sqlx::PgPool;
+use tokio::sync::mpsc;
 use tonic::{transport::Server, Request, Response, Status};
 use tonic_web::GrpcWebLayer;
 use std::env::var;
+use dotenv::dotenv;
 
 mod service;
 mod db;
@@ -151,11 +151,19 @@ async fn shutdown_signal_recv() -> std::io::Result<()> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
+    dotenv().ok();
+
     println!("Trying to connect to PostgreSQL database...");
     let pg: PgPool = db::connect(var("DATABASE_URL").expect("DATABASE_URL is not set or cannot be read")).await?;
 
     let sv_addr = "0.0.0.0:50051".parse()?;
     let agent_addr = var("AGENT_URL").unwrap_or(String::from("http://127.0.0.1:50052")).parse::<Uri>()?;
+
+    let google_auth_info = GoogleAuthClientInfo {
+        client_id: var("GOOGLE_CLIENT_ID").expect("GOOGLE_CLIENT_ID not set"),
+        client_secret: var("GOOGLE_CLIENT_SECRET").expect("GOOGLE_CLIENT_SECRET not set"),
+        redirect_uri: var("GOOGLE_REDIRECT_URI").expect("GOOGLE_REDIRECT_URI not set")
+    };
 
     println!("Starting gRPC server...");
 
@@ -174,10 +182,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             pg_pool: pg_inner.clone()
         };
 
+        let auth_svc = middleware::google_auth::AuthServiceImpl::new(pg_inner.clone(), google_auth_info.clone());
+
         Server::builder()
             .accept_http1(true)
             .layer(tower_http::cors::CorsLayer::very_permissive())
             .layer(GrpcWebLayer::new())
+            .layer(AuthLayer::new(google_auth_info, pg_inner.clone()))
+            .add_service(AuthServiceServer::new(auth_svc))
             .add_service(KuEaterBackendServer::new(service))
             .add_service(KuEaterDebugServer::new(debug_svc))
             .serve_with_shutdown(sv_addr, async {

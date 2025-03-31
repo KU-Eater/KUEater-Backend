@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::future::{self, Future};
 use std::{pin::Pin, str::FromStr};
 use std::clone::Clone;
@@ -5,14 +6,19 @@ use std::clone::Clone;
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use reqwest::Client;
 use serde::{Serialize, Deserialize};
-use tonic::Status;
+use sqlx::types::Uuid;
+use sqlx::{query, PgPool, Row};
+use tonic::{Request, Response, Status};
 use tower::{BoxError, Layer, Service};
-use http::{Request as HttpRequest, Response as HttpResponse};
+use http::{Request as HttpRequest, Response as HttpResponse, Uri};
+use super::kueater_auth::auth_service_server::AuthService;
+use super::kueater_auth::{AuthProcessRequest, AuthProcessResponse, LogoutProcessRequest, LogoutProcessResponse};
 
 // Follows Google OIDC auth process
 
 const CERT_LINK: &str = "https://www.googleapis.com/oauth2/v3/certs";
 const ISSUER_LINK: &str = "accounts.google.com";
+const TOKEN_ENDPOINT: &str = "https://oauth2.googleapis.com/token";
 
 // reference: https://www.googleapis.com/oauth2/v3/certs
 #[derive(Debug, Deserialize, Serialize)]
@@ -43,16 +49,31 @@ struct GoogleClaims {
     azp: Option<String>,    // Client ID of presenter, maybe required?
 }
 
-struct AuthServiceImpl {
+#[derive(Debug, Clone)]
+pub struct GoogleAuthClientInfo {
+    pub client_id: String,
+    pub client_secret: String,
+    pub redirect_uri: String
+}
+
+#[derive(Debug, Deserialize)]
+struct GoogleExchange {
+    access_token: String,
+    id_token: String
+}
+
+pub struct AuthServiceImpl {
     http_client: Client,
-    google_client_id: String
+    pg_pool: PgPool,
+    google_auth_info: GoogleAuthClientInfo
 }
 
 impl AuthServiceImpl {
-    fn new(google_client_id: String) -> Self {
+    pub fn new(pg_pool: PgPool, google_auth_info: GoogleAuthClientInfo) -> Self {
         Self {
             http_client: Client::new(),
-            google_client_id
+            pg_pool,
+            google_auth_info
         }
     }
 
@@ -92,7 +113,7 @@ impl AuthServiceImpl {
             Algorithm::from_str(&key.alg)
             .map_err(|e| Status::invalid_argument(format!("Cannot get algorithm from alg: {}", e)))?
         );
-        validator.set_audience(&[&self.google_client_id]);
+        validator.set_audience(&[&self.google_auth_info.client_id]);
         validator.set_issuer(&[format!("https://{}", ISSUER_LINK), ISSUER_LINK.to_string()]);
 
         let claims = decode::<GoogleClaims>(token, &decoding_key, &validator)
@@ -103,19 +124,133 @@ impl AuthServiceImpl {
     } 
 }
 
-// TODO: Implement Tonic Service for autheorization
+// TODO: Implement Tonic Service for authorization
 // TODO: Add function within the service to get user email
 // TODO: Add function to validate token and retrieve access token
+#[tonic::async_trait]
+impl AuthService for AuthServiceImpl {
+
+    async fn auth_process(
+        &self, request: Request<AuthProcessRequest>
+    ) -> Result<Response<AuthProcessResponse>, Status> {
+        let data = request.into_inner();
+        let code = data.code;
+        let error = Status::aborted("Google auth failed");
+
+        // Start Google auth process
+        let mut params = HashMap::new();
+        params.insert("code", code);
+        params.insert("client_id", self.google_auth_info.client_id.clone());
+        params.insert("client_secret", self.google_auth_info.client_secret.clone());
+        params.insert("redirect_uri", self.google_auth_info.redirect_uri.clone());
+        params.insert("grant_type", String::from("authorization_code"));
+
+        let resp = self.http_client.post(TOKEN_ENDPOINT)
+            .form(&params)
+            .send()
+            .await.map_err(|_| Status::internal("Cannot send to token url"))?;
+
+        let resp = resp.json::<GoogleExchange>()
+            .await.map_err(|e| Status::internal(format!("Cannot retrieve tokens: {:?}", e)))?;
+
+        // We can now pass the id token to validate
+        let claims = self.validate_google_id_token(&resp.id_token).await?;
+
+        // Database calls;
+            // Do we have user profile with existing email?
+        let _query = format!(
+            "SELECT id, email FROM kueater.userprofile WHERE email = '{}'",
+             claims.email
+        );
+
+        match sqlx::query(&_query).fetch_one(&self.pg_pool).await {
+            Err(_) => {
+                // Not existent, create a new user profile
+                let mut tx = self.pg_pool.begin().await.map_err(|_| error.clone())?;
+                
+                let __query = format!(
+                    "
+                    INSERT INTO kueater.userprofile (name, email)
+                    VALUES ('', '{}') RETURNING id
+                    ", claims.email
+                );
+                let result = sqlx::query(&__query)
+                .fetch_one(&mut *tx).await.map_err(|_| Status::internal("Database operations error"))?;
+
+                // UUID of user profile
+                let uid = result.get::<Uuid, &str>("id");
+                let __query = format!(
+                    "
+                    INSERT INTO kueater.google_access_token (token, user_id) VALUES
+                    ('{}', '{}')
+                    ", resp.access_token, uid.to_string()
+                );
+                sqlx::query(&__query)
+                .execute(&mut *tx).await.map_err(|_| Status::internal("Database operations error"))?;
+
+                tx.commit().await.map_err(|_| error.clone())?;
+
+                return Ok(Response::new(AuthProcessResponse {
+                    token: resp.access_token,
+                    user_id: uid.to_string()
+                }));
+            }
+            Ok(r) => {
+                // Exist
+                let uid = r.get::<Uuid, &str>("id");
+
+                let mut tx = self.pg_pool.begin().await.map_err(|_| error.clone())?;
+                // Ensure that old access token is deleted,
+                let __query = format!(
+                    "
+                    DELETE FROM kueater.google_access_token
+                    WHERE user_id = '{}'
+                    ", uid.to_string()
+                );
+                sqlx::query(&__query).execute(&mut *tx).await.map_err(
+                    |e| Status::internal(format!("Database operations error: {}", e))
+                )?;
+
+                let __query = format!(
+                    "
+                    INSERT INTO kueater.google_access_token (token, user_id) VALUES
+                    ('{}', '{}')
+                    ", resp.access_token, uid.to_string() 
+                );
+                sqlx::query(&__query)
+                .execute(&mut *tx).await.map_err(
+                    |e| Status::internal(format!("Database operations error: {}", e))
+                )?;
+
+                tx.commit().await.map_err(|_| error.clone())?;
+
+                return Ok(Response::new(AuthProcessResponse {
+                    token: resp.access_token,
+                    user_id: uid.to_string(),
+                }));
+            }
+        };
+    }
+
+    async fn logout_process(
+        &self, request: Request<LogoutProcessRequest>
+    ) -> Result<Response<LogoutProcessResponse>, Status> {
+        Err(Status::unimplemented("Unimplemented"))
+    }
+
+}
 
 #[derive(Clone)]
-struct AuthLayer {
-    google_client_id: String
+pub struct AuthLayer {
+    google_auth_info: GoogleAuthClientInfo,
+    pg_pool: PgPool
 }
 
 impl AuthLayer {
-    fn new(google_client_id: String) -> Self {
+    pub fn new(google_auth_info: GoogleAuthClientInfo, pg_pool: PgPool) -> Self {
         Self {
-            google_client_id
+            google_auth_info,
+            pg_pool
         }
     }
 }
@@ -126,17 +261,19 @@ impl<S> Layer<S> for AuthLayer {
     fn layer(&self, inner: S) -> Self::Service {
         AuthMiddleware {
             inner,
-            google_client_id: self.google_client_id.clone(),
-            http_client: Client::new()
+            google_auth_info: self.google_auth_info.clone(),
+            http_client: Client::new(),
+            pg_pool: self.pg_pool.clone()
         }
     }
 }
 
 #[derive(Clone)]
-struct AuthMiddleware<S> {
+pub struct AuthMiddleware<S> {
     inner: S,
-    google_client_id: String,
-    http_client: Client
+    google_auth_info: GoogleAuthClientInfo,
+    http_client: Client,
+    pg_pool: PgPool
 }
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -169,37 +306,63 @@ impl<S, ReqBody, ResBody> Service<HttpRequest<ReqBody>> for AuthMiddleware<S> wh
             });
         }
 
-        // Make sure the client has auth header
-        let auth_header = match req.headers().get("authorization") {
-            Some(h) => h,
+        let auth_header = req.headers().get(http::header::AUTHORIZATION);
+        let token_result = match auth_header {
+            Some(h) => {
+                match h.to_str() {
+                    Ok(s) if s.starts_with("Bearer ") => Ok(s[7..].to_string()),
+                    Ok(_) => {
+                        let status = Status::unauthenticated("Invalid authorization format");
+                        Err(status.into())
+                    },
+                    Err(_) => {
+                        let status = Status::unauthenticated("Invalid authorization header");
+                        Err(status.into())
+                    }
+                }
+            },
             None => {
                 let status = Status::unauthenticated("Missing authorization header");
-                return Box::pin(future::ready(Err(status.into())));
+                Err(status.into())
             }
         };
 
-        // Verify token
-        let auth_val = match auth_header.to_str() {
-            Ok(s) => s,
-            Err(_) => {
-                let status = Status::unauthenticated("Invalid authorization header");
-                return Box::pin(future::ready(Err(status.into())));
-            }
+        // Early return if token extraction failed
+        let token = match token_result {
+            Ok(t) => t,
+            Err(e) => return Box::pin(future::ready(Err(e))),
         };
-
-        if !auth_val.starts_with("Bearer ") {
-            let status = Status::unauthenticated("Invalid authorization format");
-            return Box::pin(future::ready(Err(status.into())));
-        }
-
-        // Extract token
-        let token = &auth_val[7..];
-
-        // TODO: Validate token within the database
+        
+        let pg_pool = self.pg_pool.clone();
 
         Box::pin(async move {
-            inner.call(req).await.map_err(Into::into)
-        })
 
+            let query = sqlx::query_as::<_, (bool,)>(
+                "
+                SELECT
+                COALESCE(BOOL_OR(token IS NOT NULL), FALSE) AS exist
+                FROM kueater.google_access_token
+                WHERE token = $1
+                "
+            )
+            .bind(&token)
+            .fetch_one(&pg_pool)
+            .await;
+        
+            match query {
+                Ok((exist,)) => {
+                    if !exist {
+                        let status = Status::unauthenticated("Invalid token");
+                        return Err(status.into());
+                    }
+                    // Token is valid, proceed with the request
+                    inner.call(req).await.map_err(Into::into)
+                }
+                Err(_) => {
+                    let status = Status::internal("Database error");
+                    Err(status.into())
+                }
+            }
+        })
     }
 }

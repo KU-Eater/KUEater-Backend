@@ -123,12 +123,5 @@ CREATE TABLE IF NOT EXISTS kueater.review (
     stall UUID REFERENCES kueater.stall ON DELETE CASCADE,
     content TEXT NOT NULL,
     score INT NOT NULL,
-    created TIMESTAMP NOT NULL,
-    updated TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS kueater.review_context (
-    review_id UUID REFERENCES kueater.review ON DELETE CASCADE,
-    menu_id UUID REFERENCES kueater.menuitem ON DELETE CASCADE,
-    PRIMARY KEY (review_id, menu_id)
+    created TIMESTAMP NOT NULL DEFAULT NOW()
 );

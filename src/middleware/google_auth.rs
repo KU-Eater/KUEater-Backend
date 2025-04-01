@@ -8,11 +8,14 @@ use reqwest::Client;
 use serde::{Serialize, Deserialize};
 use sqlx::types::Uuid;
 use sqlx::{query, PgPool, Row};
-use tonic::{Request, Response, Status};
-use tower::{BoxError, Layer, Service};
-use http::{Request as HttpRequest, Response as HttpResponse, Uri};
+use tonic::body::BoxBody;
+use tonic::transport::Body;
+use tonic::{async_trait, Request, Response, Status};
+use tonic_middleware::RequestInterceptor;
 use super::kueater_auth::auth_service_server::AuthService;
 use super::kueater_auth::{AuthProcessRequest, AuthProcessResponse, LogoutProcessRequest, LogoutProcessResponse};
+
+use tonic::codegen::http::{Request as Rq, Response as Rp};
 
 // Follows Google OIDC auth process
 
@@ -137,6 +140,10 @@ impl AuthService for AuthServiceImpl {
         let code = data.code;
         let error = Status::aborted("Google auth failed");
 
+        if code.is_empty() {
+            return Err(Status::aborted("No Google code"))
+        }
+
         // Start Google auth process
         let mut params = HashMap::new();
         params.insert("code", code);
@@ -241,12 +248,12 @@ impl AuthService for AuthServiceImpl {
 }
 
 #[derive(Clone)]
-pub struct AuthLayer {
+pub struct AuthInterceptor {
     google_auth_info: GoogleAuthClientInfo,
     pg_pool: PgPool
 }
 
-impl AuthLayer {
+impl AuthInterceptor {
     pub fn new(google_auth_info: GoogleAuthClientInfo, pg_pool: PgPool) -> Self {
         Self {
             google_auth_info,
@@ -255,114 +262,60 @@ impl AuthLayer {
     }
 }
 
-impl<S> Layer<S> for AuthLayer {
-    type Service = AuthMiddleware<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        AuthMiddleware {
-            inner,
-            google_auth_info: self.google_auth_info.clone(),
-            http_client: Client::new(),
-            pg_pool: self.pg_pool.clone()
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct AuthMiddleware<S> {
-    inner: S,
-    google_auth_info: GoogleAuthClientInfo,
-    http_client: Client,
-    pg_pool: PgPool
-}
-
-type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
-// Token based authentication middleware
-impl<S, ReqBody, ResBody> Service<HttpRequest<ReqBody>> for AuthMiddleware<S> where
-    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-    S::Error: Into<BoxError> + Send + Sync,
-    ReqBody: Send + 'static,
-    ResBody: Send + 'static
-{
-    type Response = S::Response;
-    type Error = BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx).map_err(Into::into)
-    }
-
-    fn call(&mut self, req: HttpRequest<ReqBody>) -> Self::Future {
-        let clone = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, clone);
-        let path = req.uri().path();
-
-        // Skip auth service so this protects only the rest of API
-        if path.contains("kueater.auth.AuthService") {
-            return Box::pin(async move {
-                inner.call(req).await.map_err(Into::into)
-            });
-        }
-
-        let auth_header = req.headers().get(http::header::AUTHORIZATION);
-        let token_result = match auth_header {
+#[async_trait]
+impl RequestInterceptor for AuthInterceptor {
+    async fn intercept(&self, mut req: Rq<BoxBody>) -> Result<Rq<BoxBody>, Status> {
+        let token_result = match req.headers().get("authorization") {
             Some(h) => {
                 match h.to_str() {
-                    Ok(s) if s.starts_with("Bearer ") => Ok(s[7..].to_string()),
+                    Ok(token) if token.starts_with("Bearer ") => Ok(token[7..].to_string()),
                     Ok(_) => {
-                        let status = Status::unauthenticated("Invalid authorization format");
-                        Err(status.into())
-                    },
-                    Err(_) => {
-                        let status = Status::unauthenticated("Invalid authorization header");
-                        Err(status.into())
+                        Err(Status::unauthenticated("Invalid token format"))
                     }
+                    Err(_) => Err(Status::unauthenticated("Invalid header"))
                 }
-            },
-            None => {
-                let status = Status::unauthenticated("Missing authorization header");
-                Err(status.into())
-            }
+            } 
+            _ => Err(Status::unauthenticated("Unauthenticated"))
         };
 
-        // Early return if token extraction failed
         let token = match token_result {
             Ok(t) => t,
-            Err(e) => return Box::pin(future::ready(Err(e))),
+            Err(e) => return Err(e)
         };
-        
+
         let pg_pool = self.pg_pool.clone();
 
-        Box::pin(async move {
+        let query = sqlx::query_as::<_, (Uuid,)>(
+            "
+            SELECT
+            user_id
+            FROM kueater.google_access_token
+            WHERE token = $1
+            "
+        )
+        .bind(&token)
+        .fetch_optional(&pg_pool)
+        .await;
 
-            let query = sqlx::query_as::<_, (bool,)>(
-                "
-                SELECT
-                COALESCE(BOOL_OR(token IS NOT NULL), FALSE) AS exist
-                FROM kueater.google_access_token
-                WHERE token = $1
-                "
-            )
-            .bind(&token)
-            .fetch_one(&pg_pool)
-            .await;
-        
-            match query {
-                Ok((exist,)) => {
-                    if !exist {
-                        let status = Status::unauthenticated("Invalid token");
-                        return Err(status.into());
+        match query {
+            Ok(row) => {
+                match row {
+                    Some((id,)) => {
+                        let extensions = req.extensions_mut();
+                        extensions.insert(crate::service::UserContext {
+                            user_id: id.to_string()
+                        });
+                        Ok(req)
                     }
-                    // Token is valid, proceed with the request
-                    inner.call(req).await.map_err(Into::into)
-                }
-                Err(_) => {
-                    let status = Status::internal("Database error");
-                    Err(status.into())
+                    None => {
+                        return Err(Status::unauthenticated("Invalid token"))
+                    }
                 }
             }
-        })
+            Err(e) => {
+                println!("{}", e);
+                Err(Status::internal("Database error"))
+            }
+        }
     }
 }

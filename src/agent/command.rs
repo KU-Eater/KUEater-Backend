@@ -12,6 +12,6 @@ pub enum Command {
 
 pub struct AgentCommand {
     pub msg: Command,
-    pub tx: oneshot::Sender<String>
+    pub tx: Option<oneshot::Sender<String>>
 }
 

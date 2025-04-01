@@ -7,18 +7,26 @@ edition = "2021"
 tonic = "0.12"
 tonic-types = "0.12"
 tonic-web = "0.12"
+tonic-middleware = "0.2"
 prost = "0.13"
 prost-types = "0.13"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "signal", "sync"] }
 tower = { version = "0.5" }
 tower-http = { version = "0.5", features = ["cors"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "rust_decimal"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "rust_decimal", "derive"] }
 serde = { version = "1.0", features = ["derive"] }
 num-traits = "0.2"
 jsonwebtoken = "9.3.1"
 reqwest = { version = "0.12.15", features = ["json"] }
 http = "1.3.1"
 dotenv = "0.15.0"
+futures = "0.3"
+
+[dependencies.uuid]
+version = "1.14.0"
+features = [
+    "serde"
+]
 
 [build-dependencies]
 tonic-build = "0.12"

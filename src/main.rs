@@ -1,103 +1,25 @@
 use http::Uri;
-use middleware::{google_auth::{AuthLayer, GoogleAuthClientInfo}, kueater_auth::{self, auth_service_server::{AuthService, AuthServiceServer}}};
-use service::kueater::data::{
-    index::{GetMenuListingsRequest, GetMenuListingsResponse, TopMenu, TopMenuRequest, TopStall, TopStallRequest},
-    ku_eater_backend_server::{KuEaterBackend, KuEaterBackendServer}, search::{SearchRequest, SearchResponse},
-    GetMenuRequest, GetMenuResponse, GetReviewRequest, GetReviewResponse, GetStallRequest, GetStallResponse,
-    review::{PostReviewRequest, PostReviewResponse, ListReviewsRequest, ListReviewsResponse}
-};
-use service::kueater::debug::{
-    datagen::{CreateTestUserProfileRequest, CreateTestUserProfileResponse},
-    ku_eater_debug_server::{KuEaterDebug, KuEaterDebugServer}
-};
 use agent::{command::{AgentCommand, Command}, kueater_agent::{self, ku_eater_embedding_agent_client::KuEaterEmbeddingAgentClient}};
 use sqlx::PgPool;
 use tokio::sync::mpsc;
 use tonic::{transport::Server, Request, Response, Status};
 use tonic_web::GrpcWebLayer;
+use tonic_middleware::InterceptorFor;
 use std::env::var;
 use dotenv::dotenv;
+
+use middleware::{google_auth::{GoogleAuthClientInfo}, kueater_auth::{self, auth_service_server::{AuthService, AuthServiceServer}}};
+use service::kueater::debug::{
+    datagen::{CreateTestUserProfileRequest, CreateTestUserProfileResponse},
+    ku_eater_debug_server::{KuEaterDebug, KuEaterDebugServer}
+};
+use service::kueater::data::ku_eater_backend_server::KuEaterBackendServer;
+use service::backend::BackendService;
 
 mod service;
 mod db;
 mod middleware;
 mod agent;
-
-type AgentCommandSender = mpsc::Sender<AgentCommand>;
-
-#[derive(Debug)]
-pub struct BackendService {
-    pg_pool: PgPool,
-    sender: AgentCommandSender
-}
-
-impl BackendService {
-    pub fn new(pg_pool: PgPool, sender: AgentCommandSender) -> Self {
-        Self {
-            pg_pool,
-            sender
-        }
-    }
-}
-
-#[tonic::async_trait]
-impl KuEaterBackend for BackendService {
-
-    async fn index_get_menu_listings(
-        &self, request: Request<GetMenuListingsRequest>
-    ) -> Result<Response<GetMenuListingsResponse>, Status> {
-        service::index::get_menu_listing(&self.pg_pool, request).await
-    }
-
-    async fn index_top_menu(
-        &self, request: Request<TopMenuRequest>
-    ) -> Result<Response<TopMenu>, Status> {
-        service::index::index_top_menu(&self.pg_pool, request).await
-    }
-
-    async fn index_top_stall(
-        &self, request: Request<TopStallRequest>
-    ) -> Result<Response<TopStall>, Status> {
-        service::index::index_top_stall(&self.pg_pool, request).await
-    }
-
-    async fn search(
-        &self, request: Request<SearchRequest>
-    ) -> Result<Response<SearchResponse>, Status> {
-        service::search::search(&self.pg_pool, &self.sender, request).await
-    }
-
-    async fn list_reviews(
-        &self, request: Request<ListReviewsRequest>
-    ) -> Result<Response<ListReviewsResponse>, Status> {
-        service::review::list_reviews(&self.pg_pool, request).await
-    }
-
-    async fn post_review(
-        &self, request: Request<PostReviewRequest>
-    ) -> Result<Response<PostReviewResponse>, Status> {
-        service::review::post_review(&self.pg_pool, request).await
-    }
-
-    async fn get_menu_item(
-        &self, request: Request<GetMenuRequest>
-    ) -> Result<Response<GetMenuResponse>, Status> {
-        service::fetch::get_menu_item(&self.pg_pool, request).await
-    }
-
-    async fn get_stall(
-        &self, request: Request<GetStallRequest>
-    ) -> Result<Response<GetStallResponse>, Status> {
-        service::fetch::get_stall(&self.pg_pool, request).await
-    }
-
-    async fn get_review(
-        &self, _request: Request<GetReviewRequest>
-    ) -> Result<Response<GetReviewResponse>, Status> {
-        Err(Status::unimplemented("Unimplemented"))
-    }
-
-}
 
 // ---
 #[derive(Debug)]
@@ -173,31 +95,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server_tx = tx.clone();
 
     let sv = tokio::spawn(async move {
-        let service = BackendService {
-            pg_pool: pg_inner.clone(),
-            sender: server_tx
-        };
+        let service = BackendService::new(pg_inner.clone(), server_tx);
 
         let debug_svc = DebugService {
             pg_pool: pg_inner.clone()
         };
 
         let auth_svc = middleware::google_auth::AuthServiceImpl::new(pg_inner.clone(), google_auth_info.clone());
+        
+        let interceptor = middleware::google_auth::AuthInterceptor::new(
+            google_auth_info, pg_inner.clone());
 
         Server::builder()
             .accept_http1(true)
             .layer(tower_http::cors::CorsLayer::very_permissive())
             .layer(GrpcWebLayer::new())
-            .layer(AuthLayer::new(google_auth_info, pg_inner.clone()))
             .add_service(AuthServiceServer::new(auth_svc))
-            .add_service(KuEaterBackendServer::new(service))
+            .add_service(InterceptorFor::new(KuEaterBackendServer::new(service), interceptor))
             .add_service(KuEaterDebugServer::new(debug_svc))
             .serve_with_shutdown(sv_addr, async {
                 shutdown_signal_recv().await.ok();
             })
             .await.unwrap();
     });
-
+    
     let _agt = tokio::spawn(async move {
         let mut client = KuEaterEmbeddingAgentClient::connect(agent_addr).await.expect(
             "Failed to connect to agent service"
@@ -213,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     });
                     let response = client.get_embedding(request).await.unwrap();
                     let vectors = response.into_inner().vectors;
-                    incoming.tx.send(vectors).unwrap_or_else(|_| println!("Error while sending back search vectors"));
+                    incoming.tx.unwrap().send(vectors).unwrap_or_else(|_| println!("Error while sending back search vectors"));
                 },
                 Command::Recommend {user_id} => {
                     let request = Request::new(kueater_agent::NewRecommendationsRequest {
@@ -224,7 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-
+    
     sv.await.unwrap();
 
     pg.close().await;

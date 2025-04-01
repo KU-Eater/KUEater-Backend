@@ -117,6 +117,7 @@ RETURNS TABLE (
     price DOUBLE PRECISION,
     likes INTEGER,
     dislikes INTEGER,
+    stall_id TExt,
     stall_name TEXT,
     stall_lock TEXT,
     image_url TEXT,
@@ -151,6 +152,7 @@ BEGIN
         m.price::DOUBLE PRECISION,                     -- price
         COALESCE(lc.count, 0)::INTEGER,                -- likes
         COALESCE(dc.count, 0)::INTEGER,                -- dislikes
+        s.id::TEXT,
         s.name,                                         -- stall_name
         s.lock::TEXT,                                   -- stall_lock (converted to text)
         m.image,                                        -- image_url

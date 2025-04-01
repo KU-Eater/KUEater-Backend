@@ -269,7 +269,8 @@ impl RequestInterceptor for AuthInterceptor {
             Some(h) => {
                 match h.to_str() {
                     Ok(token) if token.starts_with("Bearer ") => Ok(token[7..].to_string()),
-                    Ok(_) => {
+                    Ok(t) => {
+                        println!("{}", t);
                         Err(Status::unauthenticated("Invalid token format"))
                     }
                     Err(_) => Err(Status::unauthenticated("Invalid header"))

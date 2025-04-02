@@ -46,7 +46,7 @@ impl KuEaterBackend for BackendService {
     async fn create_account(
         &self, request: Recv<CreateAccountRequest>
     ) -> Send<Empty> {
-        super::after::create_account(&self.pg_pool, request).await
+        super::after::create_account(&self.pg_pool, &self.sender, request,).await
     }
 
     async fn get_preferences(

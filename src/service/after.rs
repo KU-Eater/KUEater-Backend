@@ -2,6 +2,8 @@ use sqlx::PgPool;
 use tonic::{Response, Status};
 use uuid::Uuid;
 
+use crate::{AgentCommand, Command, service::backend::AgentCommandSender};
+
 use super::backend::{Send, Recv};
 use super::kueater::{Empty, data::*};
 
@@ -68,6 +70,7 @@ pub async fn account_readiness(
 
 pub async fn create_account(
     pg_pool: &PgPool,
+    sender: &AgentCommandSender,
     request: Recv<CreateAccountRequest>
 ) -> Send<Empty> {
     let extensions = request.extensions().clone();
@@ -118,7 +121,14 @@ pub async fn create_account(
     .bind(&user_id)
     .execute(pg_pool)
     .await {
-        Ok(_) => { Ok(Response::new(Empty {})) }
+        Ok(_) => { 
+            sender.send(
+                AgentCommand { 
+                    msg: Command::Recommend { user_id: user_id.to_string() }, tx: None 
+                }
+            ).await.unwrap();
+            Ok(Response::new(Empty {})) 
+        }
         Err(e) => {
             println!("{}", e);
             return Err(Status::internal("Account creation failed"));

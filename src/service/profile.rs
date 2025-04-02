@@ -2,6 +2,8 @@ use sqlx::PgPool;
 use tonic::{Response, Status};
 use uuid::Uuid;
 
+use crate::{AgentCommand, Command, service::backend::AgentCommandSender};
+
 use crate::no_impl;
 
 use super::backend::{Send, Recv};
@@ -63,7 +65,8 @@ pub async fn save_profile(
 
 pub async fn save_preferences(
     pg_pool: &PgPool,
-    request: Recv<SavePreferencesRequest>
+    request: Recv<SavePreferencesRequest>,
+    sender: &AgentCommandSender
 ) -> Send<Empty> {
     let extensions = request.extensions().clone();
     let data = request.into_inner();
@@ -95,10 +98,17 @@ pub async fn save_preferences(
     .bind(&user_id)
     .execute(pg_pool)
     .await {
-        Ok(_) => { Ok(Response::new(Empty {})) }
+        Ok(_) => {
+            sender.send(
+                AgentCommand { 
+                    msg: Command::Recommend { user_id: user_id.to_string() }, tx: None 
+                }
+            ).await.unwrap();
+             Ok(Response::new(Empty {}))
+            }
         Err(e) => {
             println!("{}", e);
-            return Err(Status::internal("Account creation failed"));
+            return Err(Status::internal("Update preferences failed"));
         }
     }
 }

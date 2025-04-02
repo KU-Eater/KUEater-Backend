@@ -162,6 +162,6 @@ impl KuEaterBackend for BackendService {
     }
 
     async fn save_preferences(&self, request: Recv<SavePreferencesRequest>) -> Send<Empty> {
-        super::profile::save_preferences(&self.pg_pool, request).await
+        super::profile::save_preferences(&self.pg_pool, request, &self.sender).await
     }
 }

@@ -64,8 +64,8 @@ pub async fn like_item(
         }
     };
 
-    match sqlx::query("SELECT kueater.toggle_like_menu($1, $2)")
-    .bind(user_id).bind(menu_id).execute(pg_pool).await {
+    match sqlx::query("SELECT kueater.toggle_like_menu($1, $2, $3)")
+    .bind(user_id).bind(menu_id).bind(data.b).execute(pg_pool).await {
         Ok(_) => {
             tally(pg_pool, sender, user_id).await.unwrap();
         }
@@ -104,8 +104,8 @@ pub async fn dislike_item(
         }
     };
 
-    match sqlx::query("SELECT kueater.toggle_dislike_menu($1, $2)")
-    .bind(user_id).bind(menu_id).execute(pg_pool).await {
+    match sqlx::query("SELECT kueater.toggle_dislike_menu($1, $2, $3)")
+    .bind(user_id).bind(menu_id).bind(data.b).execute(pg_pool).await {
         Ok(_) => {
             tally(pg_pool, sender, user_id).await.unwrap();
         }
@@ -144,8 +144,8 @@ pub async fn save_item(
         }
     };
 
-    match sqlx::query("SELECT kueater.toggle_save_menu($1, $2)")
-    .bind(user_id).bind(menu_id).execute(pg_pool).await {
+    match sqlx::query("SELECT kueater.toggle_save_menu($1, $2, $3)")
+    .bind(user_id).bind(menu_id).bind(data.b).execute(pg_pool).await {
         Ok(_) => {
             tally(pg_pool, sender, user_id).await.unwrap();
         }
@@ -224,8 +224,8 @@ pub async fn save_stall(
         }
     };
 
-    match sqlx::query("SELECT kueater.toggle_save_stall($1, $2)")
-    .bind(user_id).bind(stall_id).execute(pg_pool).await {
+    match sqlx::query("SELECT kueater.toggle_save_stall($1, $2, $3)")
+    .bind(user_id).bind(stall_id).bind(data.b).execute(pg_pool).await {
         Ok(_) => {
             tally(pg_pool, sender, user_id).await.unwrap();
         }

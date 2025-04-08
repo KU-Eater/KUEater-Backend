@@ -1,6 +1,7 @@
 CREATE OR REPLACE FUNCTION kueater.toggle_like_menu(
     p_user_id UUID,
-    p_menu_id UUID
+    p_menu_id UUID,
+    b BOOLEAN
 )
 RETURNS VOID AS $$
 DECLARE
@@ -30,24 +31,22 @@ BEGIN
         DELETE FROM kueater.disliked_item
         WHERE user_id = p_user_id
         AND menu_id = p_menu_id;
-
-        RETURN;
     END IF;
 
     -- remove dislike
-    IF disliked THEN
+    IF disliked AND b THEN
         DELETE FROM kueater.disliked_item
         WHERE user_id = p_user_id
         AND menu_id = p_menu_id;
     END IF;
 
     -- is there - delete
-    IF liked THEN
+    IF liked AND NOT b THEN
         DELETE FROM kueater.liked_item
         WHERE user_id = p_user_id
         AND menu_id = p_menu_id;
         RETURN;
-    ELSE
+    ELSIF NOT liked AND b THEN
         INSERT INTO kueater.liked_item (user_id, menu_id) VALUES
         (p_user_id, p_menu_id);
         RETURN;
@@ -59,7 +58,8 @@ $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION kueater.toggle_dislike_menu(
     p_user_id UUID,
-    p_menu_id UUID
+    p_menu_id UUID,
+    b BOOLEAN
 )
 RETURNS VOID AS $$
 DECLARE
@@ -89,24 +89,22 @@ BEGIN
         DELETE FROM kueater.disliked_item
         WHERE user_id = p_user_id
         AND menu_id = p_menu_id;
-
-        RETURN;
     END IF;
 
     -- remove like
-    IF liked THEN
+    IF liked AND b THEN
         DELETE FROM kueater.liked_item
         WHERE user_id = p_user_id
         AND menu_id = p_menu_id;
     END IF;
 
     -- is there - delete
-    IF disliked THEN
+    IF disliked AND NOT b THEN
         DELETE FROM kueater.disliked_item
         WHERE user_id = p_user_id
         AND menu_id = p_menu_id;
         RETURN;
-    ELSE
+    ELSIF NOT disliked AND b THEN
         INSERT INTO kueater.disliked_item (user_id, menu_id) VALUES
         (p_user_id, p_menu_id);
         RETURN;
@@ -119,7 +117,8 @@ $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION kueater.toggle_save_menu(
     p_user_id UUID,
-    p_menu_id UUID
+    p_menu_id UUID,
+    b BOOLEAN
 )
 RETURNS VOID AS $$
 DECLARE
@@ -133,12 +132,12 @@ BEGIN
     ) INTO saved;
 
     -- is there - delete
-    IF saved THEN
+    IF saved AND NOT b THEN
         DELETE FROM kueater.saved_item
         WHERE user_id = p_user_id
         AND menu_id = p_menu_id;
         RETURN;
-    ELSE
+    ELSIF NOT saved AND b THEN
         INSERT INTO kueater.saved_item (user_id, menu_id) VALUES
         (p_user_id, p_menu_id);
         RETURN;
@@ -182,7 +181,8 @@ $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION kueater.toggle_save_stall(
     p_user_id UUID,
-    p_stall_id UUID
+    p_stall_id UUID,
+    b BOOLEAN
 )
 RETURNS VOID AS $$
 DECLARE
@@ -196,12 +196,12 @@ BEGIN
     ) INTO saved;
 
     -- is there - delete
-    IF saved THEN
+    IF saved AND NOT b THEN
         DELETE FROM kueater.saved_stall
         WHERE user_id = p_user_id
         AND stall_id = p_stall_id;
         RETURN;
-    ELSE
+    ELSIF NOT saved AND b THEN
         INSERT INTO kueater.saved_stall (user_id, stall_id) VALUES
         (p_user_id, p_stall_id);
         RETURN;

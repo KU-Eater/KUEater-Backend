@@ -1,0 +1,1 @@
+ALTER TYPE kueater.role ADD VALUE IF NOT EXISTS 'Alumnus' BEFORE 'Guest';
